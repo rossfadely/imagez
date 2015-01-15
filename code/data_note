@@ -1,0 +1,22 @@
+## first I do in context dr7
+SELECT TOP 10000
+specobjid, z, zerr, zconf, zstatus, zWarning, specClass into mydb.dr7spec10k from SpecObj
+WHERE 
+  specClass = 2 AND zWarning=0x000
+
+## then I get info from photobj in context dr10 (10 to get fwhm of psf)
+SELECT
+  p.objid, p.ra, p.dec, p.run, p.rerun, p.field, p.camcol, 
+  p.rowc_u, p.colc_u, p.psffwhm_u,
+  p.rowc_g, p.colc_g, p.psffwhm_g,
+  p.rowc_r, p.colc_r, p.psffwhm_r,
+  p.rowc_i, p.colc_i, p.psffwhm_i,
+  p.rowc_z, p.colc_z, p.psffwhm_z,
+  p.type
+into mydb.dr7phot10k
+from MyDB.dr7spec10k AS m 
+  JOIN PhotoObjAll AS p ON m.specobjid=p.specobjid
+
+## get images
+https://www.sdss3.org/dr9/data_access/bulk.php
+http://skyserver.sdss.org/dr10/en/help/browser/browser.aspx#&&history=description+PhotoObjAll+U
