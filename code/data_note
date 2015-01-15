@@ -17,6 +17,32 @@ into mydb.dr7phot10k
 from MyDB.dr7spec10k AS m 
   JOIN PhotoObjAll AS p ON m.specobjid=p.specobjid
 
-## get images
+## get images info
 https://www.sdss3.org/dr9/data_access/bulk.php
 http://skyserver.sdss.org/dr10/en/help/browser/browser.aspx#&&history=description+PhotoObjAll+U
+
+#### ***ACTUALLY***, SDSS SQL server crashes during the photobj lookup, do:
+SELECT TOP 10000
+  objid, specobjid, ra, dec, run, rerun, field, camcol, type,
+  rowc_u, colc_u, rowc_g, colc_g, rowc_r, colc_r, 
+  rowc_i, colc_i, rowc_z, colc_z, 
+  mrrccpsf_u, mrrccpsf_g, mrrccpsf_r, mrrccpsf_i, mrrccpsf_z
+into mydb.dr7photfirstdr710k
+from PhotoObjAll
+where
+  (type = 3) AND (specobjid != 0)
+  AND psfmag_r > 18.0 AND psfmag_r < 21.5
+  AND ((flags_r & 0x10000000) != 0)
+  AND ((flags_r & 0x8100000c00a4) = 0)
+  AND (((flags_r & 0x400000000000) = 0) or (psfmagerr_r <= 0.1))
+  AND (((flags_r & 0x100000000000) = 0) or (flags_r & 0x1000) = 0)
+  AND ((flags_r & 0x8100000c00a0) = 0)
+order by rand()
+
+## Then get the spectral info
+SELECT
+  p.specobjid, p.z, p.zerr, p.zconf, p.zstatus, p.zWarning, p.specClass 
+into mydb.dr7spec2nddr710k
+from MyDB.dr7photfirstdr710k AS m 
+  JOIN SpecObj AS p ON m.specobjid=p.specobjid
+
