@@ -2,6 +2,7 @@ import os
 import glob
 import time
 import warnings
+import multiprocessing
 import numpy as np
 import pyfits as pf
 
@@ -84,7 +85,11 @@ def get_images(photfile, datadir, context='dr7'):
     else:
         fetcher = query_sdss_dr10
 
+    message = '#' * 80 + '\n' * 3 + 'Now on %d' + '\n' * 3 + '#' * 80
+
     for i in range(len(data)):
+        if i % 300 == 0:
+            print message % i
         fetcher(datadir, data['run'][i], data['rerun'][i], data['camcol'][i],
                 data['field'][i])
 
@@ -99,14 +104,17 @@ def get_orig_patch(data, patch_size, row, col):
     patch = data[row - dlt - 1:row + dlt, col - dlt - 1:col + dlt]
     return patch.ravel()
 
-def make_orig_patches(photfile, specfile, img_dir, patch_dir, targfile,
-                      patch_size=25, tol=1.e-3):
+def block_patchify((data, spec, patch_dir, patch_size, tol, thread)):
+    """
+    Take a chunk of the data and make patches.
+    """
+
+def make_orig_patches(photfile, specfile, img_dir, patch_dir, patch_size=25,
+                      tol=1.e-3, start=0, end=None):
     """
     Cut out patches in the images and save to disk.
     """
-    cwd = os.getcwd()
     os.chdir(img_dir)
-
     f = pf.open(photfile)
     data = f[1].data
     f.close()
@@ -115,16 +123,17 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, targfile,
     spec = f[1].data
     f.close()
 
-    f = open(patch_dir + targfile, 'w')
-    f.write('# specobjid z zerr\n')
-    f.close()
+    if end == None:
+        end = len(data)
 
-    for i in range(len(data)):
+    for i in range(start, end):
         if i % 5 == 0:
             print 'Processing patch', i
 
         # match to spectral info, reject if necessary
-        ind = data['specobjid'][i] == spec['specobjid']
+        ind = np.where(data['specobjid'][i] == spec['specobjid'])[0]
+        if len(ind) > 1:
+            ind = ind[0] # some repeat images of same object!!
         specinfo = spec[ind]
         if ((specinfo['specclass'] != 2) | (specinfo['zwarning'] != 0)):
             continue
@@ -142,15 +151,19 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, targfile,
         frames = ['./%s/fpC-%s-%s-%s.fit.gz' % (run, filled_run, f + camcol,
                                                 filled_field) for f in filts]
 
-        if not os.path.exists(frames[-1]):
-            assert False, 'Image frame has not been downloaded.'
-
         patch = np.zeros((patch_size ** 2., 5))
         patch_file = patch_dir + 'orig_%s.fits' % str(data['specobjid'][i])
         if os.path.exists(patch_file):
             continue
 
         for j in range(5):
+            if not os.path.exists(frames[j]):
+                print glob.glob('ls -l')
+                print os.getcwd()
+                print i, j, data[i]
+                print frames[j]
+                assert False, 'Image frame has not been downloaded.'
+
             # unpack data
             img_file = frames[j]
             os.system('gunzip %s' % frames[j])
@@ -167,12 +180,6 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, targfile,
 
         hdu = pf.PrimaryHDU(patch)
         hdu.writeto(patch_file)
-
-        f = open(patch_dir + targfile, 'a')
-        out = [str(specinfo['specobjid'][0]), str(specinfo['z'][0]),
-               str(specinfo['zerr'][0])]
-        f.write(' '.join(out) + '\n')
-        f.close()
 
 def downsample(patch, factor, save_path=None):
     """
@@ -207,18 +214,19 @@ def gen_feature_file(data_dir, save_path, factor=4, orig_size=25):
 if __name__ == '__main__':
     # Run the script
     img_dir = os.environ['IMGZDATA']
-    photfile = img_dir + 'dr7photfirstdr710k_rfadely.fit'
-    specfile = img_dir + 'dr7spec2nddr710k_rfadely.fit'
+    photfile = img_dir + 'dr7photfirstdr724k_rfadely.fit'
+    specfile = img_dir + 'dr7spec2nddr724k_rfadely.fit'
     patch_dir = img_dir + 'patches/dr7/orig/'
     img_dir += 'dr7/'
 
     if False:
         get_images(photfile, img_dir)
 
-    if False:
-        warnings.filterwarnings("ignore")
-        targfile = 'dr710k_targets.dat'
-        make_orig_patches(photfile, specfile, img_dir, patch_dir, targfile)
-
     if True:
+        warnings.filterwarnings("ignore")
+        targfile = 'dr724k_targets'
+        make_orig_patches(photfile, specfile, img_dir, patch_dir, start=6000,
+                          end=8000)
+
+    if False:
         gen_feature_file(patch_dir, 'f')
