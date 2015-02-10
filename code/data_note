@@ -46,3 +46,47 @@ into mydb.dr7spec2nddr710k
 from MyDB.dr7photfirstdr710k AS m 
   JOIN SpecObj AS p ON m.specobjid=p.specobjid
 
+
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+###############################################################################
+DR12
+
+SELECT TOP 50000 s.specObjID, s.objid, s.ra,s.dec,
+  s.type as specType, q.type as photpType,
+  q.cModelMag_g,q.cModelMagErr_g,
+  q.cModelMag_r,q.cModelMagErr_r,
+  q.cModelMag_i,q.cModelMagErr_i,
+  q.ra, q.dec, q.run, q.rerun, q.field, q.camcol,
+  q.rowc_u, q.colc_u, q.psffwhm_u,
+  q.rowc_g, q.colc_g, q.psffwhm_g,
+  q.rowc_r, q.colc_r, q.psffwhm_r,
+  q.rowc_i, q.colc_i, q.psffwhm_i,
+  q.rowc_z, q.colc_z, q.psffwhm_z,
+  q.devphi_u, q.expphi_u,
+  q.devphi_g, q.expphi_g,
+  q.devphi_r, q.expphi_r,
+  q.devphi_i, q.expphi_i,
+  q.devphi_z, q.expphi_z,
+  q.extinction_u,q.extinction_g,q.extinction_r,
+  q.extinction_i,q.extinction_z,
+  p.z AS photoz, p.zerr AS photoz_err,
+  s.z AS specz, s.zerr AS specz_err,
+  s.survey, s.programname, s.sciencePrimary,
+  s.legacyPrimary, s.seguePrimary, s.segue1Primary, 
+  s.segue2Primary, s.bossPrimary, s.sdssPrimary,
+  s.legacy_target1, s.legacy_target2,
+  s.segue1_target1, s.segue1_target2, s.class
+INTO mydb.dr12_50k FROM SpecPhotoAll AS s
+JOIN photoObjAll AS q
+ON s.objid=q.objid AND q.cModelMag_u>0
+AND q.cModelMag_g>0 AND q.cModelMag_r>0
+AND q.cModelMag_z>0 AND q.cModelMag_i>0
+AND q.expAB_r >0 AND s.legacy_target1 = 0x00000040
+AND s.class = 'GALAXY' AND s.zWarning = 0
+  LEFT OUTER JOIN Photoz AS p ON s.objid=p.objid
+  ORDER BY rand()

@@ -8,18 +8,27 @@ import pyfits as pf
 
 from skimage.transform import downscale_local_mean
 
-def query_sdss_dr10(save_dir, run, rerun, camcol, field):
+def query_sdss(save_dir, run, rerun, camcol, field, context='dr12'):
     """
     Retrieve a calibrated images from sdss for the given parameters.
     """
     nz = 6 - len(run)
     filled_run = '0' * nz + run
-    nz = 6 - len(field)
+    nz = 4 - len(field)
     filled_field = '0' * nz + field
     frames = ['frame-%s-%s-%s-%s.fits.bz2' % (f, filled_run, camcol,
                                               filled_field)
               for f in 'ugriz']
-    cmd = 'wget http://data.sdss3.org/sas/dr10/boss/photoObj/frames/'
+
+    cwd = os.getcwd()
+    save_dir += run + '/'
+    try:
+        os.mkdir(save_dir)
+    except:
+        pass
+    os.chdir(save_dir)
+
+    cmd = 'wget http://data.sdss3.org/sas/%s/boss/photoObj/frames/' % context
     cmd += '%s/%s/%s/' % (rerun, run, camcol)
     for i in range(5):
         file_path = save_dir + frames[i]
@@ -28,9 +37,11 @@ def query_sdss_dr10(save_dir, run, rerun, camcol, field):
         else:
             os.system(cmd + frames[i])
             while True:
-                time.sleep(10)
+                time.sleep(2)
                 if os.path.exists(file_path):
-                    continue
+                    break
+
+    os.chdir(cwd)
     return frames
 
 def query_sdss_dr7(save_dir, run, rerun, camcol, field):
@@ -71,7 +82,7 @@ def query_sdss_dr7(save_dir, run, rerun, camcol, field):
     os.chdir(cwd)
     return frames
 
-def get_images(photfile, datadir, context='dr7'):
+def get_images(photfile, datadir, context='dr12', start=None, end=None):
     """
     Take photometry file (with list of run, camcol, etc) and get all the SDSS
     images needed.
@@ -80,18 +91,23 @@ def get_images(photfile, datadir, context='dr7'):
     data = f[1].data
     f.close()
 
+    if start is not None:
+        if end is None:
+            end = -1
+        data = data[start:end]
+
     if context == 'dr7':
         fetcher = query_sdss_dr7
     else:
-        fetcher = query_sdss_dr10
+        fetcher = query_sdss
 
     message = '#' * 80 + '\n' * 3 + 'Now on %d' + '\n' * 3 + '#' * 80
 
     for i in range(len(data)):
         if i % 300 == 0:
             print message % i
-        fetcher(datadir, data['run'][i], data['rerun'][i], data['camcol'][i],
-                data['field'][i])
+        fetcher(datadir, str(data['run'][i]), str(data['rerun'][i]),
+                str(data['camcol'][i]), str(data['field'][i]))
 
 def make_img_list(photfile, data_dir, listfile, context='dr7'):
     """
@@ -140,7 +156,7 @@ def get_orig_patch(data, patch_size, row, col):
     return patch.ravel()
 
 def make_orig_patches(photfile, specfile, img_dir, patch_dir, patch_size=25,
-                      tol=1.e-3, start=0, end=None):
+                      tol=1.e-3, start=0, end=None, context='dr12'):
     """
     Cut out patches in the images and save to disk.
     """
@@ -165,8 +181,6 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, patch_size=25,
         if len(ind) > 1:
             ind = ind[0] # some repeat images of same object!!
         specinfo = spec[ind]
-        if ((specinfo['specclass'] != 2) | (specinfo['zwarning'] != 0)):
-            continue
 
         run = str(data['run'][i])
         field = str(data['field'][i])
@@ -178,8 +192,16 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, patch_size=25,
         filled_field = '0' * nz + field
 
         filts = 'ugriz'
-        frames = ['./%s/fpC-%s-%s-%s.fit.gz' % (run, filled_run, f + camcol,
-                                                filled_field) for f in filts]
+        if context == 'dr7':
+            frames = ['./%s/fpC-%s-%s-%s.fit.gz' % (run, filled_run,
+                                                    f + camcol,
+                                                    filled_field)
+                      for f in filts]
+        else:
+            frames = ['./%s/frame-%s-%s-%s-%s.fits.bz2' % (run, f, filled_run,
+                                                           camcol,
+                                                           filled_field)
+                      for f in 'ugriz']
 
         patch = np.zeros((patch_size ** 2., 5))
         patch_file = patch_dir + 'orig_%s.fits' % str(data['specobjid'][i])
@@ -194,16 +216,18 @@ def make_orig_patches(photfile, specfile, img_dir, patch_dir, patch_size=25,
                 print frames[j]
                 assert False, 'Image frame has not been downloaded.'
 
-            # unpack data
+            # unpack data and read image
             img_file = frames[j]
-            os.system('gunzip %s' % frames[j])
-
-            # read image
-            f = pf.open(frames[j][:-3])
+            if context == 'dr7':
+                os.system('gunzip %s' % frames[j])
+                f = pf.open(frames[j][:-3])
+                os.system('gzip %s' % frames[j][:-3])
+            else:
+                os.system('bzip2 -d %s' % frames[j])
+                f = pf.open(frames[j][:-4])
+                os.system('bzip2 %s' % frames[j][:-4])
             img = f[0].data
             f.close()
-            os.system('gzip %s' % frames[j][:-3])
-            img -= np.median(img) # smart or not???
             patch[:, j] = get_orig_patch(img, patch_size,
                                          data['rowc_' + filts[j]][i],
                                          data['colc_' + filts[j]][i])
@@ -340,22 +364,24 @@ def match_photozs_to_orig(patch_dir, photozfile, photfile, outpath):
 if __name__ == '__main__':
     # Run the script
     img_dir = os.environ['IMGZDATA']
-    photfile = img_dir + 'dr7photfirstdr724k_rfadely.fit'
-    specfile = img_dir + 'dr7spec2nddr724k_rfadely.fit'
-    photozfile = img_dir + 'dr7photozdr724k_rfadely.fit'
-    patch_dir = img_dir + 'patches/dr7/orig/'
-    data_dir = img_dir + 'patches/dr7/'
-    img_dir += 'dr7/'
+    photfile = img_dir + 'dr12_main_50k_rfadely.fit'
+    specfile = photfile
+    photozfile = photfile
+    #specfile = img_dir + 'dr7spec2nddr724k_rfadely.fit'
+    #photozfile = img_dir + 'dr7photozdr724k_rfadely.fit'
+    patch_dir = img_dir + 'patches/dr12/orig/'
+    data_dir = img_dir + 'patches/dr12/'
+    img_dir += 'dr12/'
 
     if False:
-        get_images(photfile, img_dir)
+        get_images(photfile, img_dir, start=32500, end=35000)
 
     if False:
         make_img_list(photfile, img_dir, img_dir + 'dr724k_imgs.txt')
 
-    if False:
+    if True:
         warnings.filterwarnings("ignore")
-        s, e = 23000, 24000
+        s, e = 40000, 50000
         make_orig_patches(photfile, specfile, img_dir, patch_dir, start=s,
                           end=e)
 
@@ -363,6 +389,8 @@ if __name__ == '__main__':
         gen_final_files(patch_dir, data_dir + 'dr7_fact4_avg_withpsf',
                         photfile, specfile)
 
-    if True:
+    if False:
         outpath = data_dir + 'dr7_fact4_avg_withpsf_photoz.txt'
         match_photozs_to_orig(patch_dir, photozfile, photfile, outpath)
+
+
