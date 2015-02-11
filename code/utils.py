@@ -6,17 +6,25 @@ def zero_mean(x):
     """
     return x - np.mean(x, axis=0)
 
-def zca_whiten(x, epsilon=1.e-10):
+def zca_whiten(data, epsilon=1.e-10, K=None):
     """
-    Return the ZCA whitening matrix.
+    Return the ZCA whitening matrix. Seems silly to switch input from NxD to
+    DxN but seems to be faster in most cases.
+
+    See http://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
     """
-    assert x.shape[0] >= x.shape[1], 'Not enough samples.'
-    cov = np.dot(x, x.T) / (data.shape[0])
+    # returned matrix y does not give yyT = I unless true
+    assert data.shape[0] > data.shape[1], 'Nsamples should be > Ndim'
+
+    x = data.T # assumes NxD input
+    if K is not None:
+        raise Exception('Dimensionality reduction not implemented.')
+    cov = np.dot(x, x.T) / x.shape[1]
     u, s, v = np.linalg.svd(cov)
-    evl, evc = s / (x.shape[0]), v.T
-    pt1 = np.dot(np.diag(1. / np.sqrt(evl + epsilon)), np.dot(evc.T, x))
-    xwzca = np.dot(evc, pt1) / np.sqrt(x.shape[0])
-    return xwzca
+    xrot = np.dot(u.T, x)
+    xpca = np.dot(np.diag(1. / np.sqrt(s + epsilon)), xrot)
+    xzca = np.dot(u, xpca)
+    return xzca.T
 
 if __name__ == '__main__':
 
@@ -30,7 +38,7 @@ if __name__ == '__main__':
         os.chdir(patchdir)
         files = glob.glob('*fits')
 
-        N = 625
+        N = 700
         data = np.zeros((N, 625))
         for i in range(N):
             f = pf.open(files[i])
@@ -38,7 +46,7 @@ if __name__ == '__main__':
             f.close()
 
         data = zero_mean(data[:, :10])
-        data_whitened = zca_whiten(data)
-        print np.std(data_whitened, axis=0)
+        data_whitened = zca_whiten(data, epsilon=0.)
+        print 'STD along dim axis:\n', np.std(data_whitened, axis=0)
         new_cov = np.dot(data_whitened.T, data_whitened) / N
-        print np.diag(new_cov)
+        print 'Element of Cov diagonal:\n', np.diag(new_cov)
