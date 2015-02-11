@@ -8,7 +8,7 @@ def zero_mean(x):
 
 def zca_whiten(data, epsilon=1.e-10, K=None):
     """
-    Return the ZCA whitening matrix. Seems silly to switch input from NxD to
+    Return the ZCA whitened matrix. Seems silly to switch input from NxD to
     DxN but seems to be faster in most cases.
 
     See http://www.cs.toronto.edu/~kriz/learning-features-2009-TR.pdf
