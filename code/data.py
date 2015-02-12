@@ -1,15 +1,9 @@
-from matplotlib import use; use('Agg')
-from skimage.transform import downscale_local_mean, rotate
+from skimage.transform import AffineTransform, rotate, warp
 
 import os
 import glob
-import time
-import warnings
-import multiprocessing
 import numpy as np
 import pyfits as pf
-import matplotlib.pyplot as pl
-
 
 def query_sdss(save_dir, run, rerun, camcol, field, context='dr12'):
     """
@@ -47,44 +41,6 @@ def query_sdss(save_dir, run, rerun, camcol, field, context='dr12'):
     os.chdir(cwd)
     return frames
 
-def query_sdss_dr7(save_dir, run, rerun, camcol, field):
-    """
-    Retrieve a calibrated images from sdss for the given parameters.
-    """
-    run = str(run)
-    field = str(field)
-    rerun = str(rerun)
-    camcol = str(camcol)
-
-    cwd = os.getcwd()
-    save_dir += run + '/'
-    try:
-        os.mkdir(save_dir)
-    except:
-        pass
-    os.chdir(save_dir)
-
-    nz = 6 - len(run)
-    filled_run = '0' * nz + run
-    nz = 4 - len(field)
-    filled_field = '0' * nz + field
-    frames = ['fpC-%s-%s-%s.fit.gz' % (filled_run, f + camcol,
-                                       filled_field) for f in 'ugriz']
-    cmd = 'wget http://das.sdss.org/imaging/'
-    cmd += '%s/%s/corr/%s/' % (run, rerun, camcol)
-    for i in range(5):
-        file_path = save_dir + frames[i]
-        if os.path.exists(file_path):
-            pass
-        else:
-            os.system(cmd + frames[i])
-            while True:
-                time.sleep(2)
-                if os.path.exists(file_path):
-                    break
-    os.chdir(cwd)
-    return frames
-
 def get_images(photfile, datadir, context='dr12', start=None, end=None):
     """
     Take photometry file (with list of run, camcol, etc) and get all the SDSS
@@ -112,41 +68,6 @@ def get_images(photfile, datadir, context='dr12', start=None, end=None):
         fetcher(datadir, str(data['run'][i]), str(data['rerun'][i]),
                 str(data['camcol'][i]), str(data['field'][i]))
 
-def make_img_list(photfile, data_dir, listfile, context='dr7'):
-    """
-    Make a list of the images need to be downloaded from SDSS.
-    """
-    f = pf.open(photfile)
-    data = f[1].data
-    f.close()
-
-    if context == 'dr7':
-        frame = data_dir + '%s/fpC-%s-%s-%s.fit.gz\n'
-    else:
-        assert False, 'need to specify format for other contexts'
-
-    uniques = []
-    f = open(listfile, 'w')
-    for i in range(len(data)):
-        if i % 500 == 0:
-            print iscr
-        run = data['run'][i].astype(np.str)
-        rerun = data['rerun'][i].astype(np.str)
-        field = data['field'][i].astype(np.str)
-        camcol = data['camcol'][i].astype(np.str)
-        nz = 6 - len(run)
-        filled_run = '0' * nz + str(run)
-        nz = 4 - len(field)
-        filled_field = '0' * nz + str(field)
-        for filt in 'ugriz':
-            line = frame % (run, filled_run, filt + camcol, filled_field)
-            if line in uniques:
-                pass
-            else:
-                f.write(line)
-                uniques.append(line)
-    f.close()
-
 def get_orig_patch(data, patch_size, row, col):
     """
     Extract a patch from the SDSS calibrated image.
@@ -155,7 +76,7 @@ def get_orig_patch(data, patch_size, row, col):
     col = np.round(col)
     assert patch_size % 2 == 1, 'Patch size should be odd'
     dlt = (patch_size - 1) / 2
-    patch = data[row - dlt - 1:row + dlt, col - dlt - 1:col + dlt]
+    patch = data[row - dlt:row + dlt + 1, col - dlt:col + dlt + 1]
     return patch
 
 def downsample(patch, factor, save_path=None):
@@ -168,8 +89,9 @@ def downsample(patch, factor, save_path=None):
         hdu.writeto(save_path)
     return new
 
-def make_centered_rotated_patches(photfile, patch_dir, ind_file, PA_final=45.,
-                                  pshape=(25, 25), start=0, end=None,
+def make_centered_rotated_patches(photfile, patch_dir, img_dir, ind_file, name,
+                                  PA_final=45.,
+                                  patch_size=25, start=0, end=None,
                                   do_shift=True, do_rotation=True,
                                   floor=1.e-5):
     """
@@ -195,8 +117,10 @@ def make_centered_rotated_patches(photfile, patch_dir, ind_file, PA_final=45.,
         end = len(info[:, 0])
     inds = info[start:end, 0].astype(np.int)
 
+    os.chdir(img_dir)
     for i in inds:
-        patch_file = patch_dir + 'orig_%s.fits' % str(data['specobjid'][i])
+        print i
+        patch_file = patch_dir + name + '_%s.fits' % str(data['specobjid'][i])
         if os.path.exists(patch_file):
             continue
 
@@ -215,9 +139,11 @@ def make_centered_rotated_patches(photfile, patch_dir, ind_file, PA_final=45.,
                   for f in 'ugriz']
 
         out_patch_data = np.zeros((patch_size ** 2., 5))
+        od = np.zeros((patch_size ** 2., 5))
         for j in range(5):
             # check that image exists
             if not os.path.exists(frames[j]):
+                print os.getcwd()
                 print frames[j]
                 assert False, 'Image frame has not been downloaded.'
 
@@ -239,24 +165,30 @@ def make_centered_rotated_patches(photfile, patch_dir, ind_file, PA_final=45.,
                 patch = np.maximum(floor, patch)
 
             if do_shift | do_rotation:
-                pmn, pmx = patch.min(), patch.max()
-                rng = pmx - pmn
-                patch = (patch - pmn) / rng
-                shift, rotation = None
+                pmx = patch.max()
+                rng = pmx - floor
+                patch = (patch - floor) / rng
+                shift, rotation = None, None
                 if do_shift:
-                    # find subpixel shift
+                    # find subpixel shift and move to center of pixel
                     dltr = data['rowc_' + filts[j]][i] - flrr - 0.5
                     dltc = data['colc_' + filts[j]][i] - flrc - 0.5
                     shift = -1. * np.array([dltr, dltc])
+                    tform = AffineTransform(translation=shift)
+                    patch = warp(patch, tform)
                 if do_rotation:
-                    rotation = np.deg2rad(45. - angles[i])
-                tform = AffineTransform(rotation=rotation, translation=shift)
-                patch = warp(patch, tform)
-                patch = patch * rng + pmn
+                    # rotate by the model angle
+                    rotation = -45. - angles[i]
+                    patch = rotate(patch, rotation)
+                
+                # restore the image brighness
+                patch = patch * rng + floor
+            out_patch_data[:, j] = patch.ravel()
 
-            assert False, 'Check the above is cool.'
+        hdu = pf.PrimaryHDU(out_patch_data)
+        hdu.writeto(patch_file)
 
-def generate_zspec_file(photfile, zspec_file):
+def generate_zspec_file(photfile, zspec_file, Nsearch=10):
     """
     Run through the photo data and generate a list of spec z's and indicies on
     the file.  Necessary since same obj has multiple spectra in a bunch of
@@ -272,41 +204,51 @@ def generate_zspec_file(photfile, zspec_file):
     speczs = np.zeros(N)
     speczerrs = np.zeros(N)
     while i < N:
+        if i % 200 == 0:
+            print i
         inds[i] = i
         speczs[i] = photdata['specz'][i]
         speczerrs[i] = photdata['specz_err'][i]
         if i != (N - 1):
             if photdata['objid'][i] == photdata['objid'][i + 1]:
-                if photdata['objid'][i] == photdata['objid'][i + 2]:
-                    print i
-                    assert 0
-                w = 1. / photdata['specz_err'][i:i + 2] ** 2.
-                norm = w.sum()
-                speczs[i] = photdata['specz'][i] * w[0]
-                speczs[i] += photdata['specz'][i + 1] * w[1]
+                ind = photdata['objid'][i:i + Nsearch] == photdata['objid'][i]
+                matched_zs = photdata['specz'][i:i + Nsearch][ind]
+                matched_zvars = photdata['specz_err'][i:i + Nsearch][ind] ** 2.
+                ws = 1. / matched_zvars
+                norm = ws.sum()
+                speczs[i] = np.sum([ws[j] * matched_zs[j]
+                                    for j in range(len(ws))])
                 speczs[i] /= norm
                 speczerrs[i] = 1. / np.sqrt(norm)
-                i += 1
+                i += len(ws) - 1
         i += 1
 
     ind = np.where(inds >= 0)[0]
-    print ind.shape
+    inds = inds[ind]
+    speczs = speczs[ind]
+    speczerrs = speczerrs[ind]
+    f = open(zspec_file, 'w')
+    f.write('# index specz speczerr')
+    for i in range(inds.size):
+        f.write('%d %0.8f %0.4e\n' % (inds[i], speczs[i], speczerrs[i]))
+    f.close()
 
 if __name__ == '__main__':
     # Run the script
     img_dir = os.environ['IMGZDATA']
     photfile = img_dir + 'dr12_main_50k_rfadely.fit'
-    patch_dir = img_dir + 'patches/dr12/orig/'
+    patch_dir = img_dir + 'patches/dr12/shifted/'
     data_dir = img_dir + 'patches/dr12/'
     img_dir += 'dr12/'
+    zspec_file = img_dir + 'dr12_main_50k_z-ind.txt'
 
     if False:
         get_images(photfile, img_dir, start=32500, end=35000)
 
-    if True:
-        zspec_file = img_dir + 'dr12_main_50k_z-ind.txt'
+    if False:
         generate_zspec_file(photfile, zspec_file)
 
     if False:
-        make_rotated_patches(photfile, patch_dir)
-
+        s, e = 0, None
+        make_centered_rotated_patches(photfile, patch_dir, img_dir, zspec_file,
+                                      's_r', start=s, end=e)
