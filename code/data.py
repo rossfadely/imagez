@@ -1,4 +1,5 @@
-from skimage.transform import AffineTransform, rotate, warp
+from skimage.transform import AffineTransform
+from skimage.transform import downscale_local_mean, rotate, warp
 
 import os
 import glob
@@ -79,7 +80,7 @@ def get_orig_patch(data, patch_size, row, col):
     patch = data[row - dlt:row + dlt + 1, col - dlt:col + dlt + 1]
     return patch
 
-def downsample(patch, factor, save_path=None):
+def downsample_patch(patch, factor, save_path=None):
     """
     Downsample the original patch.
     """
@@ -183,7 +184,12 @@ def make_centered_rotated_patches(photfile, patch_dir, img_dir, ind_file, name,
                 
                 # restore the image brighness
                 patch = patch * rng + floor
-            out_patch_data[:, j] = patch.ravel()
+            try:
+                out_patch_data[:, j] = patch.ravel()
+            except:
+                f = open(img_dir + 'failedinds.txt', 'a')
+                f.write('%d\n' % i)
+                f.close()
 
         hdu = pf.PrimaryHDU(out_patch_data)
         hdu.writeto(patch_file)
@@ -233,6 +239,53 @@ def generate_zspec_file(photfile, zspec_file, Nsearch=10):
         f.write('%d %0.8f %0.4e\n' % (inds[i], speczs[i], speczerrs[i]))
     f.close()
 
+def agglomerate_patches(patch_base, out_name, photfile, ind_file,
+                        downsample=None, patch_size=25):
+    """
+    Create a single file with (possibly) downsampled data.
+    """
+    f = pf.open(photfile)
+    data = f[1].data
+    f.close()
+
+    # read spec z file with indicies in first column
+    info = np.loadtxt(ind_file)
+    inds = info[:, 0].astype(np.int)
+
+    if downsample == None:
+        size = patch_size ** 2
+    else:
+        size = downsample ** 2
+
+    patches = np.zeros((inds.size, size, 5))
+    for i in inds:
+        extincts = np.array([data['extinction_' + f][i] for f in 'ugriz'])
+        extincts = 1. / 10. ** (-0.4 * extincts)
+
+        # get patch
+        f = pf.open(patch_base + '_%s.fits' % str(data['specobjid'][i]))
+        patch = f[0].data
+        f.close()
+        pn = patch.min()
+        ind = np.where(patch == pn)
+        patch *= extincts[None, :]
+        patch[ind] = pn
+
+        # downsample
+        if downsample is not None:
+            for j in range(5):
+                p = downsample_patch(patch[:, j].reshape(patch_size,
+                                                         patch_size),
+                                 (patch_size / downsample))
+                patches[i, :, j] = p
+
+    # write to single fits file
+    hdu = pf.PrimaryHDU(patches[:, :, 0])
+    hdu.writeto(out_name)
+    for i in range(1, 5):
+        pf.append(out_name, patches[:, :, i])
+
+
 if __name__ == '__main__':
     # Run the script
     img_dir = os.environ['IMGZDATA']
@@ -252,3 +305,9 @@ if __name__ == '__main__':
         s, e = 0, None
         make_centered_rotated_patches(photfile, patch_dir, img_dir, zspec_file,
                                       's_r', start=s, end=e)
+
+    if True:
+        patch_base = patch_dir + 's_r'
+        out_name = patch_dir + 'foo.fits'
+        aglomerate_patches(patch_base, out_name, photfile, zspec_file,
+                           downsample=5)        
