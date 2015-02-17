@@ -258,7 +258,9 @@ def agglomerate_patches(patch_base, out_name, photfile, ind_file,
         size = downsample ** 2
 
     patches = np.zeros((inds.size, size, 5))
-    for i in inds:
+    for n, i in enumerate(inds):
+        if i % 100 == 0:
+            print n, i
         extincts = np.array([data['extinction_' + f][i] for f in 'ugriz'])
         extincts = 1. / 10. ** (-0.4 * extincts)
 
@@ -277,7 +279,7 @@ def agglomerate_patches(patch_base, out_name, photfile, ind_file,
                 p = downsample_patch(patch[:, j].reshape(patch_size,
                                                          patch_size),
                                  (patch_size / downsample))
-                patches[i, :, j] = p
+                patches[n, :, j] = p.ravel()
 
     # write to single fits file
     hdu = pf.PrimaryHDU(patches[:, :, 0])
@@ -285,6 +287,21 @@ def agglomerate_patches(patch_base, out_name, photfile, ind_file,
     for i in range(1, 5):
         pf.append(out_name, patches[:, :, i])
 
+def revap_list(specz_file, fail_file):
+    """
+    All the above assumes that full patch size is possible given image
+    position.  A `failed list' is generated for edge cases, lets thro out those
+    from the existing list.
+    """
+    d = np.loadtxt(specz_file)
+    ind = np.unique(np.loadtxt(fail_file).astype(np.int))
+
+    f = open(specz_file, 'w')
+    f.write('# index specz speczerr\n')
+    for i in range(d.shape[0]):
+        if d[i, 0] not in ind:
+            f.write('%d %0.8f %0.4e\n' % (np.int(d[i, 0]), d[i, 1], d[i, 2]))
+    f.close()
 
 if __name__ == '__main__':
     # Run the script
@@ -306,8 +323,11 @@ if __name__ == '__main__':
         make_centered_rotated_patches(photfile, patch_dir, img_dir, zspec_file,
                                       's_r', start=s, end=e)
 
+    if False:
+        revap_list(zspec_file, img_dir + 'failedinds.txt')
+
     if True:
         patch_base = patch_dir + 's_r'
-        out_name = patch_dir + 'foo.fits'
-        aglomerate_patches(patch_base, out_name, photfile, zspec_file,
-                           downsample=5)        
+        out_name = patch_dir + 's_r_5x5.fits'
+        agglomerate_patches(patch_base, out_name, photfile, zspec_file,
+                            downsample=5)        

@@ -1,12 +1,49 @@
 import numpy as np
 
-def zero_mean(x):
+def process(x, logscale=True, seed=8675309, test_frac=0.2, zm=True, zca=True,
+            divide=False, r=2):
+    """
+    Zero mean and ZCA whiten the data.  Optionally convert to log space
+    Finally, split into train/test.
+    """
+    np.random.seed(seed)
+    if divide:
+        for i in range(x.shape[1]):
+            if i != r:
+                x[:, i] /= x[:, r]
+    if logscale:
+        x = np.log10(x)
+    trn, tst, trn_ind, tst_ind = split_data(x, test_frac)
+    if zm:
+        trn, mean = zero_mean(trn)
+        tst, _ = zero_mean(tst, mean)
+    if zca:
+        trn, u, s = zca_whiten(trn)
+        tst, _, _ = zca_whiten(tst, u=u, s=s)
+    return trn, tst, trn_ind, tst_ind
+
+def split_data(x, test_frac):
+    """
+    Split the data into train and test.
+    """
+    N = x.shape[0]
+    Ntst = np.round(test_frac * N).astype(np.int)
+    ind = np.random.permutation(N)
+    trn_ind = ind[Ntst:]
+    tst_ind = ind[:Ntst]
+    trn = x[trn_ind]
+    tst = x[tst_ind]
+    return trn, tst, trn_ind, tst_ind
+
+def zero_mean(x, mean=None):
     """
     Return the mean subtracted matrix.
     """
-    return x - np.mean(x, axis=0)
+    if mean is None:
+        mean = np.mean(x, axis=0)
+    return x - np.mean(x, axis=0), mean
 
-def zca_whiten(data, epsilon=1.e-10, K=None):
+def zca_whiten(data, epsilon=1.e-10, K=None, u=None, s=None):
     """
     Return the ZCA whitened matrix. Seems silly to switch input from NxD to
     DxN but seems to be faster in most cases.
@@ -20,11 +57,12 @@ def zca_whiten(data, epsilon=1.e-10, K=None):
     if K is not None:
         raise Exception('Dimensionality reduction not implemented.')
     cov = np.dot(x, x.T) / x.shape[1]
-    u, s, v = np.linalg.svd(cov)
+    if u is None:
+        u, s, v = np.linalg.svd(cov)
     xrot = np.dot(u.T, x)
     xpca = np.dot(np.diag(1. / np.sqrt(s + epsilon)), xrot)
     xzca = np.dot(u, xpca)
-    return xzca.T
+    return xzca.T, u, s
 
 if __name__ == '__main__':
 
