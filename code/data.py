@@ -303,6 +303,49 @@ def revap_list(specz_file, fail_file):
             f.write('%d %0.8f %0.4e\n' % (np.int(d[i, 0]), d[i, 1], d[i, 2]))
     f.close()
 
+def fetch_image_data(data_file, spec_info_file, phot_file):
+    """
+    Take the agglomerated fits file and convert to numpy array.
+    """
+    f = pf.open(data_file)
+    u = f[0].data
+    size = u.shape[1]
+    data = np.zeros((u.shape[0], 5 * size))
+    for i in range(5):
+        data[:, i * size:(i + 1) * size] = f[i].data
+    f.close()
+
+    spec_info = np.loadtxt(spec_info_file)
+    f = pf.open(phot_file)
+    photoz = f[1].data[spec_info[:, 0].astype(np.int)]['photoz']
+    f.close()
+    assert data.shape[0] == spec_info.shape[0]
+
+    return data, spec_info, photoz
+
+def fetch_traditional_data(data_file, spec_info_file, colors=True,
+                           ancillary=None, keep=2):
+    """
+    Get magnitudes/colors and ancillary data.
+    """
+    assert ancillary is None, 'extra features not implemented'
+
+    spec_info = np.loadtxt(spec_info_file)
+    f = pf.open(data_file)
+    data = f[1].data[spec_info[:, 0].astype(np.int)]
+    f.close()
+
+    filts = 'ugriz'
+    out = np.zeros((len(data), len(filts)))
+    for i, f in enumerate(filts):
+        out[:, i] = data['cModelMag_' + f] - data['extinction_' + f]
+
+    if colors:
+        out[:, :keep] -= out[:, keep][:, None]
+        out[:, keep + 1:] -= out[:, keep][:, None]
+
+    return out, spec_info, data['photoz']
+
 if __name__ == '__main__':
     # Run the script
     img_dir = os.environ['IMGZDATA']
@@ -326,8 +369,11 @@ if __name__ == '__main__':
     if False:
         revap_list(zspec_file, img_dir + 'failedinds.txt')
 
-    if True:
+    if False:
         patch_base = patch_dir + 's_r'
         out_name = patch_dir + 's_r_5x5.fits'
         agglomerate_patches(patch_base, out_name, photfile, zspec_file,
                             downsample=5)        
+        
+    if True:
+        fetch_traditional_data(photfile, zspec_file)
