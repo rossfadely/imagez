@@ -1,7 +1,7 @@
 import numpy as np
 
 def process(x, logscale=True, seed=8675309, test_frac=0.2, zm=True, zca=True,
-            divide=False, r=2):
+            divide=False, r=2, flatten=False):
     """
     Zero mean and ZCA whiten the data.  Optionally convert to log space
     Finally, split into train/test.
@@ -18,8 +18,15 @@ def process(x, logscale=True, seed=8675309, test_frac=0.2, zm=True, zca=True,
         trn, mean = zero_mean(trn)
         tst, _ = zero_mean(tst, mean)
     if zca:
-        trn, u, s = zca_whiten(trn)
-        tst, _, _ = zca_whiten(tst, u=u, s=s)
+        trnshp = trn.shape
+        tstshp = tst.shape
+        newtrnshape = (trnshp[0], trnshp[1] * trnshp[2] * trnshp[3]) 
+        newtstshape = (tstshp[0], tstshp[1] * tstshp[2] * tstshp[3]) 
+        trn, u, s = zca_whiten(trn.reshape(newtrnshape))
+        tst, _, _ = zca_whiten(tst.reshape(newtstshape), u=u, s=s)
+        if not flatten:
+            trn = trn.reshape(trnshp)
+            tst = tst.reshape(tstshp)
     return trn, tst, trn_ind, tst_ind
 
 def split_data(x, test_frac):

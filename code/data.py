@@ -309,17 +309,18 @@ def fetch_image_data(data_file, spec_info_file, phot_file):
     """
     f = pf.open(data_file)
     u = f[0].data
-    size = u.shape[1]
-    data = np.zeros((u.shape[0], 5 * size))
+    Ndata = u.shape[0]
+    size = np.sqrt(u.shape[1])
+    data = np.zeros((Ndata, 5, size, size))
     for i in range(5):
-        data[:, i * size:(i + 1) * size] = f[i].data
+        data[:, i] = f[i].data.reshape(Ndata, size, size)
     f.close()
 
     spec_info = np.loadtxt(spec_info_file)
     f = pf.open(phot_file)
     photoz = f[1].data[spec_info[:, 0].astype(np.int)]['photoz']
     f.close()
-    assert data.shape[0] == spec_info.shape[0]
+    assert Ndata == spec_info.shape[0]
 
     return data, spec_info, photoz
 
